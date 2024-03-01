@@ -1,24 +1,22 @@
 package net.testudobank;
 
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.jdbc.core.JdbcTemplate;
-
-import java.util.Map;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.HashSet;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.util.List;
-
-import java.util.Optional;
-import java.util.Set;
-
-import org.springframework.beans.factory.annotation.Autowired;
 
 @Controller
 public class MvcController {
@@ -325,6 +323,19 @@ public class MvcController {
     if (userDepositAmt < 0) {
       return "welcome";
     }
+
+    // check if the deposit is qualifying
+    if (userDepositAmt > 20) {
+      int numDepositsForInterest = TestudoBankRepository.getCustomerNumberOfDepositsForInterest(jdbcTemplate, userID);
+      numDepositsForInterest++;
+    // reset the counter and apply interest if it reaches 5
+    if (numDepositsForInterest >= 5) {
+        applyInterest(user);
+        numDepositsForInterest = 0; 
+    }
+    TestudoBankRepository.setCustomerNumberOfDepositsForInterest(jdbcTemplate, userID, numDepositsForInterest);
+}
+
     
     //// Complete Deposit Transaction ////
     int userDepositAmtInPennies = convertDollarsToPennies(userDepositAmt); // dollar amounts stored as pennies to avoid floating point errors
@@ -362,6 +373,8 @@ public class MvcController {
     updateAccountInfo(user);
     return "account_info";
   }
+
+  
 	private int applyInterestRateToPennyAmount(int pennyAmount) {
     return (int) (pennyAmount * INTEREST_RATE);
   }
@@ -809,10 +822,32 @@ public class MvcController {
    * @param user
    * @return "account_info" if interest applied. Otherwise, redirect to "welcome" page.
    */
-  public String applyInterest(@ModelAttribute("user") User user) {
 
-    return "welcome";
 
-  }
+   public String applyInterest(@ModelAttribute("user") User user) {
+    String userID = user.getUsername();
+    
+    int balanceInPennies = TestudoBankRepository.getCustomerCashBalanceInPennies(jdbcTemplate, userID);
+    
+    double interestRate = 1.015; // Equivalent to 1.5% APY
+    int interestInPennies = (int) (balanceInPennies * (interestRate - 1));
+    
+    TestudoBankRepository.increaseCustomerCashBalance(jdbcTemplate, userID, interestInPennies);
+    
+    // Reset the NumDepositsForInterest counter
+    TestudoBankRepository.setCustomerNumberOfDepositsForInterest(jdbcTemplate, userID, 0);
+    
+    // Log the interest application in TransactionHistory
+    String currentTime = SQL_DATETIME_FORMATTER.format(new java.util.Date());
+    TestudoBankRepository.insertRowToTransactionHistoryTable(jdbcTemplate, userID, currentTime, "InterestApplied", interestInPennies);
+    
+    updateAccountInfo(user);
+    return "account_info";
+}
+
+  
+
+
+
 
 }
