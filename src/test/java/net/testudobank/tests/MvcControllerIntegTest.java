@@ -12,9 +12,6 @@ import java.util.Map;
 
 import javax.script.ScriptException;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import net.testudobank.CryptoPriceClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -29,6 +26,9 @@ import org.testcontainers.jdbc.JdbcDatabaseDelegate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import net.testudobank.CryptoPriceClient;
 import net.testudobank.MvcController;
 import net.testudobank.User;
 import net.testudobank.helpers.MvcControllerIntegTestHelpers;
@@ -79,6 +79,91 @@ public class MvcControllerIntegTest {
   }
 
   //// INTEGRATION TESTS ////
+
+  @Test
+public void testInterestAppliedEvery5QualifyingDeposits() throws Exception {
+    // Assuming constants CUSTOMER_ID and DEPOSIT_AMOUNT exist or are initialized here
+    String customerId = "testCustomer";
+    double initialBalance = 1000; 
+    double depositAmount = 25.00; 
+
+    // Make 4 deposits above $20, no interest should be applied yet
+    for (int i = 0; i < 4; i++) {
+        MvcControllerIntegTestHelpers.makeDeposit(jdbcTemplate, customerId, depositAmount); 
+        double expectedBalanceAfterDeposits = initialBalance + depositAmount * (i + 1);
+        MvcControllerIntegTestHelpers.verifyNoInterestApplied(jdbcTemplate, customerId, expectedBalanceAfterDeposits); 
+    }
+
+
+    MvcControllerIntegTestHelpers.makeDeposit(jdbcTemplate, customerId, depositAmount); 
+    double expectedBalanceAfter5thDeposit = initialBalance + depositAmount * 5;
+    MvcControllerIntegTestHelpers.verifyInterestApplication(jdbcTemplate, customerId, expectedBalanceAfter5thDeposit, 5 * depositAmount); // This verifies the interest is applied correctly
+}
+
+
+
+
+@Test
+public void testInterestApplicationResetAfterEvery5thDeposit() throws Exception {
+    String customerId = "testCustomer";
+    double initialBalance = 1000; 
+    double depositAmount = 25.00; 
+  for (int i = 0; i < 10; i++) {
+        MvcControllerIntegTestHelpers.makeDeposit(jdbcTemplate, customerId, depositAmount);
+        
+        if ((i + 1) % 5 == 0) {
+            double expectedBalanceBeforeInterest = initialBalance + depositAmount * (i + 1); 
+            
+            MvcControllerIntegTestHelpers.verifyInterestApplication(jdbcTemplate, customerId, expectedBalanceBeforeInterest, depositAmount * (i + 1));
+        } else {
+            double expectedBalance = initialBalance + depositAmount * (i + 1);
+            MvcControllerIntegTestHelpers.verifyNoInterestApplied(jdbcTemplate, customerId, expectedBalance);
+        }
+    }
+}
+
+
+
+@Test
+public void testInterestAppliedOnlyAbove20Dollars() throws Exception {
+    String customerId = "testCustomer";
+    double initialBalance = 1000;
+    double lowDepositAmount = 20.00; 
+    double highDepositAmount = 25.00; 
+
+    // Make 2 low deposits that should not count towards interest
+    for (int i = 0; i < 2; i++) {
+        MvcControllerIntegTestHelpers.makeDeposit(jdbcTemplate, customerId, lowDepositAmount);
+    }
+
+    // Make 3 high deposits, expecting no interest yet as they are not 5 qualifying deposits above $20
+    for (int i = 0; i < 3; i++) {
+        MvcControllerIntegTestHelpers.makeDeposit(jdbcTemplate, customerId, highDepositAmount);
+        double expectedBalance = initialBalance + lowDepositAmount * 2 + highDepositAmount * (i + 1);
+        MvcControllerIntegTestHelpers.verifyNoInterestApplied(jdbcTemplate, customerId, expectedBalance);
+    }
+
+    // Make 2 more high deposits, expecting interest to be applied after the 5th high deposit
+    for (int i = 3; i < 5; i++) {
+        MvcControllerIntegTestHelpers.makeDeposit(jdbcTemplate, customerId, highDepositAmount);
+        double expectedBalanceBeforeInterest = initialBalance + lowDepositAmount * 2 + highDepositAmount * (i + 1);
+        if (i == 4) { // After the 5th high deposit, verify interest is applied
+            MvcControllerIntegTestHelpers.verifyInterestApplication(jdbcTemplate, customerId, expectedBalanceBeforeInterest, highDepositAmount * 5);
+        } else {
+            MvcControllerIntegTestHelpers.verifyNoInterestApplied(jdbcTemplate, customerId, expectedBalanceBeforeInterest); 
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
 
   /**
    * Verifies the simplest deposit case.
@@ -137,6 +222,21 @@ public class MvcControllerIntegTest {
     int CUSTOMER1_AMOUNT_TO_DEPOSIT_IN_PENNIES = MvcControllerIntegTestHelpers.convertDollarsToPennies(CUSTOMER1_AMOUNT_TO_DEPOSIT);
     MvcControllerIntegTestHelpers.checkTransactionLog(customer1TransactionLog, timeWhenDepositRequestSent, CUSTOMER1_ID, MvcController.TRANSACTION_HISTORY_DEPOSIT_ACTION, CUSTOMER1_AMOUNT_TO_DEPOSIT_IN_PENNIES);
   }
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
 
   /**
    * Verifies the simplest withdraw case.

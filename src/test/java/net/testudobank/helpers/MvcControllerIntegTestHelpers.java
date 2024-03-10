@@ -13,16 +13,21 @@ import java.util.Map;
 import javax.script.ScriptException;
 import javax.sql.DataSource;
 
-import com.mysql.cj.jdbc.MysqlDataSource;
-
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.delegate.DatabaseDelegate;
 import org.testcontainers.ext.ScriptUtils;
 
+import com.mysql.cj.jdbc.MysqlDataSource;
+
 import net.testudobank.MvcController;
+import net.testudobank.TestudoBankRepository;
 import net.testudobank.tests.MvcControllerIntegTest;
 
 public class MvcControllerIntegTestHelpers {
+  private static java.text.SimpleDateFormat SQL_DATETIME_FORMATTER = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+
+
   // Fetches DB credentials to initialize jdbcTemplate client
   public static DataSource dataSource(MySQLContainer db) {
     MysqlDataSource dataSource = new MysqlDataSource();
@@ -113,4 +118,70 @@ public class MvcControllerIntegTestHelpers {
   public static LocalDateTime convertDateToLocalDateTime(Date dateToConvert) { 
     return dateToConvert.toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime();
   }
+
+
+
+
+
+
+
+
+  public static void makeDeposit(JdbcTemplate jdbcTemplate, String customerId, double depositAmount) {
+    
+    int depositAmountInPennies = convertDollarsToPennies(depositAmount);
+
+    int currentBalanceInPennies = TestudoBankRepository.getCustomerCashBalanceInPennies(jdbcTemplate, customerId);
+
+    TestudoBankRepository.increaseCustomerCashBalance(jdbcTemplate, customerId, depositAmountInPennies);
+
+    if (depositAmount > 20) {
+        int numDepositsForInterest = TestudoBankRepository.getCustomerNumberOfDepositsForInterest(jdbcTemplate, customerId);
+
+        if ((numDepositsForInterest + 1) % 5 == 0) {
+            int interestInPennies = (int)((currentBalanceInPennies + depositAmountInPennies) * 0.015);
+            TestudoBankRepository.increaseCustomerCashBalance(jdbcTemplate, customerId, interestInPennies);
+
+            TestudoBankRepository.setCustomerNumberOfDepositsForInterest(jdbcTemplate, customerId, 0);
+        } else {
+            TestudoBankRepository.setCustomerNumberOfDepositsForInterest(jdbcTemplate, customerId, numDepositsForInterest + 1);
+        }
+    }
+
+    String currentTime = SQL_DATETIME_FORMATTER.format(new Date());
+    TestudoBankRepository.insertRowToTransactionHistoryTable(jdbcTemplate, customerId, currentTime, "Deposit", depositAmountInPennies);
+}
+
+
+
+
+public static void verifyInterestApplication(JdbcTemplate jdbcTemplate, String customerId, double initialBalance, double totalDepositAmount) {
+  double expectedBalanceAfterInterest = initialBalance + totalDepositAmount;
+  expectedBalanceAfterInterest += expectedBalanceAfterInterest * (1.015 - 1);
+  int currentBalanceInPennies = TestudoBankRepository.getCustomerCashBalanceInPennies(jdbcTemplate, customerId);
+
+  int expectedBalanceInPennies = convertDollarsToPennies(expectedBalanceAfterInterest);
+
+  assertEquals(expectedBalanceInPennies, currentBalanceInPennies, "Interest application verification failed.");
+}
+
+
+
+
+
+
+
+
+public static void verifyNoInterestApplied(JdbcTemplate jdbcTemplate, String customerId, double expectedBalance) {
+  int currentBalanceInPennies = TestudoBankRepository.getCustomerCashBalanceInPennies(jdbcTemplate, customerId);
+
+  int expectedBalanceInPennies = convertDollarsToPennies(expectedBalance);
+
+  assertEquals(expectedBalanceInPennies, currentBalanceInPennies, "No interest application verification failed.");
+}
+
+
+
+
+
+  
 }
